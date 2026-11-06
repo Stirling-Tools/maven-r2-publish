@@ -1,0 +1,159 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  AWS_ACCESS_KEY_ID: test
+  AWS_SECRET_ACCESS_KEY: test
+  AWS_DEFAULT_REGION: us-east-1
+  ENDPOINT: http://localhost:9000
+  BUCKET: e2e
+  PUBLIC_URL: http://localhost:9000/e2e/
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+      - run: shellcheck --severity=warning scripts/*.sh tests/*.sh
+      - name: actionlint
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
+          ./actionlint -color
+
+  scripts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+      - name: Start an S3 server
+        run: bash tests/start-s3.sh
+      - run: bash tests/e2e.sh
+
+  actions:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+      - name: Start an S3 server
+        run: bash tests/start-s3.sh
+      - name: Build two test repos
+        run: |
+          bash tests/make-repo.sh build/one 1.0.0
+          bash tests/make-repo.sh build/two 2.0.0
+
+      - name: Raw push
+        uses: ./
+        with:
+          repo-dir: build/one
+          prefix: raw/
+          check-url: ${{ env.PUBLIC_URL }}raw/
+          bucket: ${{ env.BUCKET }}
+          endpoint: ${{ env.ENDPOINT }}
+          access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Raw push of the same version
+        id: again
+        continue-on-error: true
+        uses: ./
+        with:
+          repo-dir: build/one
+          prefix: raw/
+          bucket: ${{ env.BUCKET }}
+          endpoint: ${{ env.ENDPOINT }}
+          access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+
+      - name: The repeat was refused
+        env:
+          OUTCOME: ${{ steps.again.outcome }}
+        run: test "$OUTCOME" = failure
+
+      - name: Stage
+        id: stage
+        uses: ./release
+        with:
+          step: stage
+          repo-dir: build/two
+          bucket: ${{ env.BUCKET }}
+          public-url: ${{ env.PUBLIC_URL }}
+          endpoint: ${{ env.ENDPOINT }}
+          access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Verify against the staging URL
+        env:
+          STAGING_URL: ${{ steps.stage.outputs.staging-url }}
+        run: |
+          test "$STAGING_URL" = "${PUBLIC_URL}staging/maven-r2-publish/${GITHUB_RUN_ID}/"
+          curl -fsS "${STAGING_URL}com/example/demo/2.0.0/demo-2.0.0.pom"
+
+      - name: Promote
+        uses: ./release
+        with:
+          step: promote
+          bucket: ${{ env.BUCKET }}
+          public-url: ${{ env.PUBLIC_URL }}
+          endpoint: ${{ env.ENDPOINT }}
+          access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Cleanup
+        if: always()
+        uses: ./release
+        with:
+          step: cleanup
+          bucket: ${{ env.BUCKET }}
+          public-url: ${{ env.PUBLIC_URL }}
+          endpoint: ${{ env.ENDPOINT }}
+          access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Released at the root, staging gone
+        run: |
+          curl -fsSL "${PUBLIC_URL}com/example/demo/maven-metadata.xml" | grep -q '<version>2.0.0</version>'
+          test -z "$(aws s3 ls "s3://$BUCKET/staging/" --recursive --endpoint-url "$ENDPOINT" || true)"
+
+      - name: Mirror dry run
+        id: plan
+        uses: ./mirror
+        with:
+          group: com.stirling
+          artifact: jpdfium
+          latest: '2'
+          dry-run: 'true'
+          bucket: ${{ env.BUCKET }}
+          public-url: ${{ env.PUBLIC_URL }}
+          endpoint: ${{ env.ENDPOINT }}
+          access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Mirror one version
+        id: mirror
+        uses: ./mirror
+        with:
+          group: com.stirling
+          artifact: jpdfium
+          versions: '1.0.0'
+          destination: mirror/
+          bucket: ${{ env.BUCKET }}
+          public-url: ${{ env.PUBLIC_URL }}
+          endpoint: ${{ env.ENDPOINT }}
+          access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Mirror outputs
+        env:
+          PLANNED: ${{ steps.plan.outputs.versions }}
+          COPIED: ${{ steps.mirror.outputs.versions }}
+          URL: ${{ steps.mirror.outputs.url }}
+        run: |
+          test "$(echo "$PLANNED" | jq length)" = 2
+          test "$COPIED" = '["1.0.0"]'
+          test "$URL" = "${PUBLIC_URL}mirror/"
+          curl -fsSL "${URL}com/stirling/jpdfium/maven-metadata.xml" | grep -q '<version>1.0.0</version>'

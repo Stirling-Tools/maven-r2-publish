@@ -1,0 +1,73 @@
+name: Maven R2 publish
+description: Upload a local Maven repository directory to an R2 (or any S3-compatible) bucket, exactly where you point it.
+branding:
+  icon: upload-cloud
+  color: orange
+
+inputs:
+  repo-dir:
+    description: Local Maven repository layout to upload, e.g. build/repo
+    required: true
+  endpoint:
+    description: S3 endpoint URL, e.g. https://<account>.r2.cloudflarestorage.com
+    required: true
+  access-key-id:
+    description: Access key ID
+    required: true
+  secret-access-key:
+    description: Secret access key
+    required: true
+  bucket:
+    description: Bucket name or s3:// URL
+    required: false
+    default: stirling-maven
+  prefix:
+    description: Key prefix under the bucket; empty is the bucket root
+    required: false
+    default: ''
+  metadata:
+    description: Rewrite each artifact's maven-metadata.xml from the live copy plus the uploaded versions
+    required: false
+    default: 'true'
+  overwrite:
+    description: Allow replacing versions that already exist under the prefix
+    required: false
+    default: 'false'
+  check-url:
+    description: Public URL of the prefix; when set, every uploaded file is downloaded from it and compared
+    required: false
+    default: ''
+
+outputs:
+  versions:
+    description: Uploaded version directories, one per line, e.g. com/example/lib/1.0.0
+    value: ${{ steps.upload.outputs.versions }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check the runner
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/scripts/require-tools.sh"
+
+    - name: Upload
+      id: upload
+      shell: bash
+      env:
+        REPO_DIR: ${{ inputs.repo-dir }}
+        BUCKET: ${{ inputs.bucket }}
+        ENDPOINT: ${{ inputs.endpoint }}
+        PREFIX: ${{ inputs.prefix }}
+        METADATA: ${{ inputs.metadata }}
+        OVERWRITE: ${{ inputs.overwrite }}
+        AWS_ACCESS_KEY_ID: ${{ inputs.access-key-id }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/publish.sh"
+
+    - name: Check every file is served unchanged
+      if: inputs.check-url != ''
+      shell: bash
+      env:
+        REPO_DIR: ${{ inputs.repo-dir }}
+        CHECK_URL: ${{ inputs.check-url }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/check-served.sh" "$REPO_DIR" "$CHECK_URL"
