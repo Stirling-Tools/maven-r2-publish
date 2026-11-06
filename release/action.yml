@@ -1,0 +1,56 @@
+name: Maven R2 release
+description: Stage, promote and clean up a Maven release on maven.stirlingpdf.com using the shared Stirling layout.
+
+inputs:
+  step:
+    description: stage, promote or cleanup
+    required: true
+  repo-dir:
+    description: Local Maven repository layout to stage; required for stage
+    required: false
+    default: ''
+  endpoint:
+    description: R2 S3 endpoint URL
+    required: true
+  access-key-id:
+    description: R2 access key ID
+    required: true
+  secret-access-key:
+    description: R2 secret access key
+    required: true
+  bucket:
+    description: Bucket behind the public URL
+    required: false
+    default: stirling-maven
+  public-url:
+    description: Public URL that serves the bucket
+    required: false
+    default: https://maven.stirlingpdf.com/
+
+outputs:
+  staging-url:
+    description: Public URL of this run's staging copy, for verify jobs
+    value: ${{ steps.release.outputs.staging-url }}
+  staging-prefix:
+    description: Bucket prefix of this run's staging copy
+    value: ${{ steps.release.outputs.staging-prefix }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check the runner
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/../scripts/require-tools.sh"
+
+    - name: ${{ inputs.step }}
+      id: release
+      shell: bash
+      env:
+        STEP: ${{ inputs.step }}
+        REPO_DIR: ${{ inputs.repo-dir }}
+        BUCKET: ${{ inputs.bucket }}
+        ENDPOINT: ${{ inputs.endpoint }}
+        PUBLIC_URL: ${{ inputs.public-url }}
+        AWS_ACCESS_KEY_ID: ${{ inputs.access-key-id }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
+      run: bash "$GITHUB_ACTION_PATH/../scripts/release.sh"

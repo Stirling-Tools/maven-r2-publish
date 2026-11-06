@@ -1,0 +1,87 @@
+name: Maven R2 mirror
+description: Copy releases already published to a Maven repo (Maven Central by default) into the R2 bucket, byte for byte.
+
+inputs:
+  group:
+    description: Group ID, e.g. com.stirling
+    required: true
+  artifact:
+    description: Main artifact whose versions are listed, e.g. jpdfium
+    required: true
+  modules:
+    description: Space-separated artifact name prefixes to copy alongside it; defaults to the artifact name
+    required: false
+    default: ''
+  versions:
+    description: all, or a list such as 1.2.0,1.3.0
+    required: false
+    default: all
+  latest:
+    description: With all, copy only this many of the newest versions
+    required: false
+    default: '5'
+  source:
+    description: Maven repo to copy from; must serve directory listings
+    required: false
+    default: https://repo1.maven.org/maven2
+  destination:
+    description: Bucket prefix to copy to, e.g. staging/mirror-test/; empty is the live root
+    required: false
+    default: ''
+  dry-run:
+    description: Only list what would be copied
+    required: false
+    default: 'false'
+  endpoint:
+    description: R2 S3 endpoint URL
+    required: true
+  access-key-id:
+    description: R2 access key ID
+    required: true
+  secret-access-key:
+    description: R2 secret access key
+    required: true
+  bucket:
+    description: Bucket behind the public URL
+    required: false
+    default: stirling-maven
+  public-url:
+    description: Public URL that serves the bucket
+    required: false
+    default: https://maven.stirlingpdf.com/
+
+outputs:
+  versions:
+    description: JSON array of the versions copied (or that would be, on a dry run)
+    value: ${{ steps.mirror.outputs.versions }}
+  url:
+    description: Public URL of the destination
+    value: ${{ steps.mirror.outputs.url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check the runner
+      shell: bash
+      run: |
+        bash "$GITHUB_ACTION_PATH/../scripts/require-tools.sh"
+        command -v jq >/dev/null || { echo "ERROR: jq is not on PATH" >&2; exit 1; }
+
+    - name: Mirror
+      id: mirror
+      shell: bash
+      env:
+        GROUP: ${{ inputs.group }}
+        ARTIFACT: ${{ inputs.artifact }}
+        MODULES: ${{ inputs.modules }}
+        VERSIONS: ${{ inputs.versions }}
+        LATEST: ${{ inputs.latest }}
+        SOURCE: ${{ inputs.source }}
+        DESTINATION: ${{ inputs.destination }}
+        DRY_RUN: ${{ inputs.dry-run }}
+        BUCKET: ${{ inputs.bucket }}
+        ENDPOINT: ${{ inputs.endpoint }}
+        PUBLIC_URL: ${{ inputs.public-url }}
+        AWS_ACCESS_KEY_ID: ${{ inputs.access-key-id }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
+      run: bash "$GITHUB_ACTION_PATH/../scripts/mirror.sh"
