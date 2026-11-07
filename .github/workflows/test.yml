@@ -57,7 +57,20 @@ jobs:
           access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
           secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
 
-      - name: Raw push of the same version
+      - name: Raw push of the same bytes again
+        uses: ./
+        with:
+          repo-dir: build/one
+          prefix: raw/
+          bucket: ${{ env.BUCKET }}
+          endpoint: ${{ env.ENDPOINT }}
+          access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Change one file of the released version
+        run: echo rebuilt >> build/one/com/example/demo/1.0.0/demo-1.0.0.jar
+
+      - name: Raw push of different bytes for the same version
         id: again
         continue-on-error: true
         uses: ./
@@ -69,7 +82,7 @@ jobs:
           access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
           secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
 
-      - name: The repeat was refused
+      - name: The different bytes were refused
         env:
           OUTCOME: ${{ steps.again.outcome }}
         run: test "$OUTCOME" = failure
