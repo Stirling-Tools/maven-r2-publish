@@ -40,7 +40,7 @@ Uploads a local Maven repository directory (whatever `./gradlew publish` or `mvn
 | `bucket` | `stirling-maven` | Bucket name or `s3://` URL. |
 | `prefix` | empty | Key prefix; empty is the bucket root. |
 | `metadata` | `true` | Rewrite each artifact's `maven-metadata.xml` from the live copy plus the uploaded versions. |
-| `overwrite` | `false` | Allow replacing versions already under the prefix. |
+| `overwrite` | `false` | Allow replacing versions already under the prefix. Without it, a version that already exists is refused unless every file already there is byte-identical to the upload, so an interrupted upload can be re-run to completion. |
 | `check-url` | empty | Public URL of the prefix. When set, every uploaded file is downloaded back and compared. |
 
 Output `versions`: the uploaded version directories, one per line.
@@ -53,8 +53,8 @@ The opinionated path to maven.stirlingpdf.com. One action, three steps, run from
 
 1. `stage` uploads to `staging/<repository>/<run-id>/` and outputs `staging-url`. It fails before uploading if any version is already released.
 2. Your verify jobs resolve the artifacts from `staging-url`.
-3. `promote` copies exactly the staged files to the root, rewrites `maven-metadata.xml`, and checks that every file is served unchanged. Released versions are never overwritten.
-4. `cleanup` deletes the staging copy; run it with `if: always()`.
+3. `promote` copies exactly the staged files to the root, rewrites `maven-metadata.xml`, and checks that every file is served unchanged. Released versions are never overwritten; a promote that stopped part-way resumes when re-run, because the files it already uploaded match the staged ones.
+4. `cleanup` deletes the staging copy once the release succeeded. Skip it when verify or promote failed, so "Re-run failed jobs" still has the staged set to work from.
 
 ```yaml
 jobs:
@@ -98,7 +98,7 @@ jobs:
 
   cleanup:
     needs: [publish, verify, promote]
-    if: ${{ always() && needs.publish.result == 'success' }}
+    if: ${{ always() && needs.publish.result == 'success' && needs.verify.result != 'failure' && needs.promote.result != 'failure' }}
     runs-on: ubuntu-latest
     environment: maven
     steps:
@@ -111,6 +111,10 @@ jobs:
 ```
 
 The promote job must use the `stirling-maven` concurrency group, so releases from different repositories never rewrite the same metadata at once. The staging path comes from the repository name and run ID, so re-running failed jobs in the same run finds the same staging copy.
+
+Staging copies from runs that failed and were never re-run stay in the bucket. Add an R2 lifecycle rule that deletes objects under `staging/` after a few days.
+
+`maven-metadata.xml` orders versions the way Maven does: `1.2.0-rc1` < `1.2.0` < `1.2.0.1`, so a later pre-release never becomes `latest` or `release`.
 
 | Input | Default | |
 |---|---|---|
@@ -153,7 +157,7 @@ jobs:
 | `destination` | empty | Bucket prefix; empty is the live root. |
 | `dry-run` | `false` | Only list the plan. |
 
-Versions already at the destination are skipped. Outputs: `versions` (JSON array of versions copied, or planned on a dry run) and `url`.
+Versions already at the destination are skipped, `latest` counts in Maven's version order, and a module with no listing for a version (HTTP 404) is skipped while any other listing failure stops the run before anything is uploaded. Outputs: `versions` (JSON array of versions copied, or planned on a dry run) and `url`.
 
 ## Testing
 

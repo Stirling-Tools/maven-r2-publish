@@ -30,7 +30,7 @@ get() { curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --max-time 300 "
 
 if [ "$VERSIONS" = all ]; then
   mapfile -t wanted < <(get "$SRC/$ARTIFACT/maven-metadata.xml" \
-    | grep -o '<version>[^<]*</version>' | sed 's#</\{0,1\}version>##g' | sort -V | tail -n "$LATEST")
+    | grep -o '<version>[^<]*</version>' | sed 's#</\{0,1\}version>##g' | python3 -I "$SCRIPT_DIR/maven_metadata.py" --sort | tail -n "$LATEST")
 else
   mapfile -t wanted < <(echo "$VERSIONS" | tr -s ', ' '\n' | sed '/^$/d')
 fi
@@ -72,11 +72,17 @@ mapfile -t modules < <(get "$SRC/" | grep -o 'href="[^"/]*/' | cut -d'"' -f2 | t
   | while read -r m; do for p in $MODULES; do [[ "$m" == "$p"* ]] && { echo "$m"; break; }; done; done)
 for v in "${copy[@]}"; do
   for m in "${modules[@]}"; do
-    listing=$(curl -fsSL --retry 5 --retry-delay 5 "$SRC/$m/$v/" 2>/dev/null) || continue
+    status=$(curl -sSL --retry 5 --retry-all-errors --retry-delay 5 -o "$WORK.listing" -w '%{http_code}' "$SRC/$m/$v/") || status=000
+    case "$status" in
+      200) listing=$(cat "$WORK.listing") ;;
+      404) continue ;;
+      *) echo "ERROR: listing $SRC/$m/$v/ failed with HTTP $status; nothing was uploaded" >&2; exit 1 ;;
+    esac
     for f in $(echo "$listing" | grep -o 'href="[^"]*"' | cut -d'"' -f2 | grep -v '/' ); do
       get --create-dirs -o "$WORK/$GROUP_PATH/$m/$v/$f" "$SRC/$m/$v/$f"
     done
   done
+  rm -f "$WORK.listing"
   [ -f "$WORK/$GROUP_PATH/$ARTIFACT/$v/$ARTIFACT-$v.pom" ] || { echo "ERROR: nothing downloaded for $v" >&2; exit 1; }
   echo "$v: $(find "$WORK" -path "*/$v/*" -type f | wc -l | tr -d ' ') files"
 done

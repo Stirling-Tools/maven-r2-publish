@@ -30,7 +30,7 @@ if [ "${#VERSION_DIRS[@]}" -eq 0 ]; then
 fi
 
 if [ "$OVERWRITE" != true ]; then
-  bash "$SCRIPT_DIR/check-absent.sh" "$PREFIX" "${VERSION_DIRS[@]}"
+  bash "$SCRIPT_DIR/check-immutable.sh" "$PREFIX" . "${VERSION_DIRS[@]}"
 fi
 
 find . -name 'maven-metadata.xml*' -delete

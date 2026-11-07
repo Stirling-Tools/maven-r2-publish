@@ -1,8 +1,10 @@
 """Writes <artifact-dir>/maven-metadata.xml plus checksums.
 
 usage: maven_metadata.py <artifact-dir> <live-metadata-or-missing> <version>...
+       maven_metadata.py --sort < versions
 Keeps every version the live file lists and adds the new ones; <latest> and
-<release> become the highest version by Maven-style numeric ordering.
+<release> become the highest version in Maven's order, where a pre-release
+such as 1.2.0-rc1 sorts below 1.2.0. --sort prints stdin's versions in that order.
 """
 
 import hashlib
@@ -13,12 +15,33 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
+QUALIFIER_RANK = {"alpha": 0, "a": 0, "beta": 1, "b": 1, "milestone": 2, "m": 2,
+                  "rc": 3, "cr": 3, "snapshot": 4, "": 5, "ga": 5, "final": 5,
+                  "release": 5, "sp": 6}
+RELEASE = (1, QUALIFIER_RANK[""], "")
+KEY_LENGTH = 32
+
+
+def token_key(token: str) -> tuple:
+    if token.isdigit():
+        return (2, int(token), "")
+    name = token.lower()
+    if name in QUALIFIER_RANK:
+        return (1, QUALIFIER_RANK[name], "")
+    return (1, len(set(QUALIFIER_RANK.values())) + 1, name)
+
+
 def version_key(version: str) -> tuple:
-    parts = re.split(r"[.\-]", version)
-    return tuple((0, int(p), "") if p.isdigit() else (-1, 0, p) for p in parts)
+    tokens = re.findall(r"\d+|[A-Za-z]+", version)
+    keys = [token_key(t) for t in tokens][:KEY_LENGTH]
+    return tuple(keys + [RELEASE] * (KEY_LENGTH - len(keys)))
 
 
 def main() -> None:
+    if sys.argv[1:] == ["--sort"]:
+        versions = [line.strip() for line in sys.stdin if line.strip()]
+        print("\n".join(sorted(versions, key=version_key)))
+        return
     artifact_dir = Path(sys.argv[1])
     live = Path(sys.argv[2])
     new_versions = sys.argv[3:]
