@@ -28,7 +28,7 @@ case "$STEP" in
     REPO_DIR="${REPO_DIR:?repo-dir is required for stage}"
     mapfile -t versions < <(cd "$REPO_DIR" && find . -name '*.pom' -exec dirname {} \; | sed 's#^\./##' | sort -u)
     [ "${#versions[@]}" -gt 0 ] || { echo "ERROR: no .pom files under $REPO_DIR" >&2; exit 1; }
-    bash "$SCRIPT_DIR/check-absent.sh" "" "${versions[@]}"
+    bash "$SCRIPT_DIR/check-immutable.sh" "" "$REPO_DIR" "${versions[@]}"
     GITHUB_OUTPUT='' REPO_DIR="$REPO_DIR" PREFIX="$STAGING" METADATA=false OVERWRITE=true bash "$SCRIPT_DIR/publish.sh"
     bash "$SCRIPT_DIR/check-served.sh" "$REPO_DIR" "$STAGING_URL"
     summary "### Staged ${#versions[@]} publications at $STAGING_URL"
